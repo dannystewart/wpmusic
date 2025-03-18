@@ -59,12 +59,12 @@ class WPConfig:
         self.initialize_env_vars()
 
         # Load environment variables into class attributes
+        self.debug = self.env.debug
         self.metadata_url = self.env.metadata_url
         self.upload_path_prefix = self.env.upload_path_prefix
         self.upload_url_prefix = self.env.upload_url_prefix
 
-        # WPConfigure log level based on debug setting
-        self.debug = self.env.debug
+        # Configure log level based on debug setting
         self.log_level = "debug" if self.env.debug else "info"
 
         # Set up paths
