@@ -9,10 +9,12 @@ import inquirer
 from dsbase.log import LocalLogger
 from dsbase.text import color as colored
 
+from wpmusic.audio_track import AudioTrack
+from wpmusic.metadata_fetcher import MetadataFetcher
+
 if TYPE_CHECKING:
     from halo import Halo
 
-    from wpmusic.audio_track import AudioTrack
     from wpmusic.configs import WPConfig
 
 
@@ -25,6 +27,35 @@ class TrackIdentifier:
             self.__class__.__name__,
             level=self.config.log_level,
             simple=self.config.log_simple,
+        )
+        self.metadata_fetcher = MetadataFetcher(config)
+        self.all_metadata = self.metadata_fetcher.all_metadata
+        self.tracks = self.all_metadata.get("tracks", [])
+
+        self.logger.debug("Loaded metadata with %s tracks.", len(self.tracks))
+
+    def create_audio_track(
+        self,
+        file_path: Path,
+        append_text: str = "",
+        is_instrumental: bool | None = None,
+        track_metadata: dict[str, Any] | None = None,
+        spinner: Halo | None = None,
+    ) -> AudioTrack:
+        """Create a fully initialized AudioTrack object with metadata and cover art."""
+        if track_metadata is None:  # If track_metadata is not provided, identify it first
+            temp_track = AudioTrack(str(file_path), append_text=append_text)
+            track_metadata = self.identify_track(temp_track, spinner)
+
+        return AudioTrack(
+            filename=str(file_path),
+            append_text=append_text,
+            track_metadata={
+                **track_metadata,
+                "album_metadata": self.all_metadata.get("metadata", {}),
+                "cover_data": self.metadata_fetcher.cover_data,
+            },
+            instrumental=is_instrumental,
         )
 
     def identify_track(
@@ -66,7 +97,7 @@ class TrackIdentifier:
         formatted_file_name = re.sub(r"[^a-zA-Z0-9-]", "-", formatted_file_name).strip("-").lower()
 
         # Iterate through the tracks in the metadata and match the filename
-        for track in audio_track.tracks:
+        for track in self.tracks:
             json_filename = (
                 re.sub(
                     r"[^a-zA-Z0-9-]",
@@ -94,12 +125,12 @@ class TrackIdentifier:
         """
         self.logger.debug("No track found for filename '%s'.", audio_track.filename)
 
-        selected_track_name = self._get_fallback_selection(audio_track.tracks)
+        selected_track_name = self._get_fallback_selection(self.tracks)
 
         if selected_track_name == "(skip adding metadata)":
             return self._handle_skipped_metadata(audio_track)
 
-        for track in audio_track.tracks:
+        for track in self.tracks:
             if track["track_name"] == selected_track_name:
                 return track
 
@@ -153,5 +184,4 @@ class TrackIdentifier:
         confirmed_filename = filename_answer["confirmed_filename"]
 
         self.logger.debug("Confirmed filename: %s", confirmed_filename)
-
         return {"file_name": confirmed_filename}

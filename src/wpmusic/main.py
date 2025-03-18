@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from halo import Halo
 
@@ -28,12 +29,14 @@ from dsbase.media import ffmpeg_audio
 from dsbase.text import color
 from dsbase.util import dsbase_setup, handle_interrupt
 
-from wpmusic.audio_track import AudioTrack
 from wpmusic.configs import WPConfig
 from wpmusic.file_manager import FileManager
 from wpmusic.metadata_setter import MetadataSetter
 from wpmusic.track_identifier import TrackIdentifier
 from wpmusic.upload_tracker import UploadTracker
+
+if TYPE_CHECKING:
+    from wpmusic.audio_track import AudioTrack
 
 dsbase_setup()
 
@@ -146,17 +149,21 @@ class WPMusic:
 
         Raises:
             TypeError: If no track is selected from the fallback menu.
+            ValueError: If processing fails for any reason.
         """
-        audio_track = AudioTrack(str(file_path), append_text=self.args.append)
-
         try:
             if not track_metadata:  # Identify the original track
-                track_metadata = self.track_identifier.identify_track(audio_track, self.spinner)
-                audio_track.set_track_metadata(track_metadata)
+                audio_track = self.track_identifier.create_audio_track(
+                    file_path, append_text=self.args.append, spinner=self.spinner
+                )
+                track_metadata = audio_track.track_metadata
             else:  # If we already have metadata, it's the instrumental for the original track
-                audio_track.set_track_metadata(track_metadata)
-                audio_track.is_instrumental = True
-                print()
+                audio_track = self.track_identifier.create_audio_track(
+                    file_path,
+                    append_text=self.args.append,
+                    is_instrumental=True,
+                    track_metadata=track_metadata,
+                )
 
             self.logger.info(
                 "%s %s%s...",
@@ -172,6 +179,8 @@ class WPMusic:
             output_filename = self.file_manager.format_filename(audio_track)
             if not output_filename:
                 self.spinner.stop()
+                msg = "No output filename provided."
+                raise ValueError(msg)
 
             self.process_and_upload(audio_track, output_filename)
 
@@ -181,15 +190,18 @@ class WPMusic:
             if not self.config.keep_files:
                 self.file_manager.cleanup_files_after_upload(audio_track, output_filename)
 
+            if not track_metadata:
+                msg = "Track metadata is unexpectedly None"
+                raise ValueError(msg)
+
             return track_metadata
 
-        except TypeError:
-            self.logger.error("Process aborted by user")
-            sys.exit(1)
-
-        except Exception as e:
-            self.logger.error("An error occurred: %s", str(e))
-            return {}
+        except TypeError as e:
+            self.logger.error("Process aborted by user: %s", str(e))
+            raise
+        except ValueError as e:
+            self.logger.error("Processing failed: %s", str(e))
+            raise
 
     def _find_instrumental_pair(self, file_path: Path) -> Path | None:
         """Find a matching instrumental file for the given file path."""
